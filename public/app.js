@@ -370,7 +370,7 @@ function renderCards() {
         <div class="pc-header">
           <div>
             <div class="pc-name">${m.name}</div>
-            <div class="pc-pos">${posLabel(m.favoritePosition)} · PS5</div>
+            <div class="pc-pos">${posLabel(m.favoritePosition)}</div>
           </div>
           <div class="pc-gp"><span>${m.gp}</span>GP</div>
         </div>
@@ -416,7 +416,6 @@ function openModal(m) {
         <span>GP: ${m.gp}</span>
         <span>Record: ${w}-${l}-${o}</span>
         <span>Win%: ${m.winpct}%</span>
-        <span>Platform: PS5</span>
       </div>
     </div>
 
