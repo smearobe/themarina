@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Marina — NHL ProClubs</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="team-identity">
+        <div class="team-logo">
+          <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="40" cy="40" r="38" fill="#0a1628" stroke="#4a9eff" stroke-width="2"/>
+            <text x="40" y="30" text-anchor="middle" fill="#4a9eff" font-size="10" font-weight="bold" font-family="Arial">THE</text>
+            <text x="40" y="46" text-anchor="middle" fill="#fff" font-size="14" font-weight="bold" font-family="Arial">MARINA</text>
+            <text x="40" y="60" text-anchor="middle" fill="#4a9eff" font-size="9" font-family="Arial">PRO CLUBS</text>
+          </svg>
+        </div>
+        <div class="team-name-block">
+          <h1>The Marina</h1>
+          <p class="subtitle">NHL ProClubs — PS5</p>
+        </div>
+      </div>
+      <div class="header-record" id="headerRecord">
+        <div class="loading-pulse">Loading…</div>
+      </div>
+    </div>
+    <nav class="tab-nav">
+      <button class="tab-btn active" data-tab="overview">Team Overview</button>
+      <button class="tab-btn" data-tab="stats">Player Stats</button>
+      <button class="tab-btn" data-tab="cards">Player Cards</button>
+    </nav>
+  </header>
+
+  <main>
+    <div id="error-banner" class="error-banner hidden">
+      <span id="error-text"></span>
+    </div>
+
+    <!-- TEAM OVERVIEW -->
+    <section id="tab-overview" class="tab-content active">
+      <div class="overview-grid">
+        <div class="card stat-summary" id="teamRecord">
+          <div class="loading-pulse">Loading…</div>
+        </div>
+        <div class="card stat-summary" id="teamOffense">
+          <div class="loading-pulse">Loading…</div>
+        </div>
+        <div class="card stat-summary" id="teamDefense">
+          <div class="loading-pulse">Loading…</div>
+        </div>
+      </div>
+      <div class="leaders-section">
+        <h2 class="section-title">Team Leaders</h2>
+        <div class="leaders-grid" id="leadersGrid">
+          <div class="loading-pulse">Loading…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PLAYER STATS TABLE -->
+    <section id="tab-stats" class="tab-content">
+      <div class="card">
+        <div class="table-controls">
+          <div class="stat-group-tabs">
+            <button class="group-btn active" data-group="scoring">Scoring</button>
+            <button class="group-btn" data-group="shooting">Shooting</button>
+            <button class="group-btn" data-group="defense">Defense</button>
+            <button class="group-btn" data-group="special">Special Teams</button>
+            <button class="group-btn" data-group="discipline">Discipline</button>
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table id="statsTable">
+            <thead id="statsTableHead"></thead>
+            <tbody id="statsTableBody">
+              <tr><td colspan="20"><div class="loading-pulse">Loading…</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="table-hint">Click any column header to sort. Click a player row to view their full card.</p>
+      </div>
+    </section>
+
+    <!-- PLAYER CARDS -->
+    <section id="tab-cards" class="tab-content">
+      <div class="cards-grid" id="cardsGrid">
+        <div class="loading-pulse">Loading…</div>
+      </div>
+    </section>
+  </main>
+
+  <!-- PLAYER MODAL -->
+  <div id="playerModal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <button class="modal-close" id="modalClose" aria-label="Close">&times;</button>
+      <div id="modalContent"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
