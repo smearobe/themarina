@@ -37,30 +37,45 @@ let sortDir = 1; // 1 = desc, -1 = asc
 let currentGroup = 'scoring';
 
 async function loadData() {
+  // Fetch member stats first — this drives all the main content
   try {
-    const [membersRes, clubRes] = await Promise.all([
-      fetch('/api/members/stats'),
-      fetch('/api/club/seasonal'),
-    ]);
+    const membersRes = await fetch('/api/members/stats');
     if (!membersRes.ok) throw new Error(`HTTP ${membersRes.status}`);
     const membersData = await membersRes.json();
     members = membersData.members || [];
-
-    if (clubRes.ok) {
-      const clubData = await clubRes.json();
-      clubInfo = Array.isArray(clubData) ? clubData[0] : (clubData['80678'] || Object.values(clubData)[0] || null);
-    }
-
-    renderAll();
   } catch (err) {
     document.getElementById('error-banner').classList.remove('hidden');
     document.getElementById('error-text').textContent =
       'Could not load stats from EA servers: ' + err.message;
-    ['teamRecord','teamOffense','teamDefense','leadersGrid','statsTableBody','cardsGrid','clubInfoBar','recentForm']
+    ['teamRecord','teamOffense','teamDefense','leadersGrid','statsTableBody','cardsGrid']
       .forEach(id => {
         const el = document.getElementById(id);
         if (el) el.innerHTML = '<p style="color:var(--muted);padding:10px 0">No data available.</p>';
       });
+    return;
+  }
+
+  // Render everything we have immediately
+  renderAll();
+
+  // Fetch club seasonal data separately — won't block the main render
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const clubRes = await fetch('/api/club/seasonal', { signal: controller.signal });
+    clearTimeout(timeout);
+    if (clubRes.ok) {
+      const clubData = await clubRes.json();
+      clubInfo = Array.isArray(clubData) ? clubData[0] : (clubData['80678'] || Object.values(clubData)[0] || null);
+      renderClubInfo();
+      renderRecentForm();
+    }
+  } catch (err) {
+    // Club info is non-critical — clear loading states silently
+    ['clubInfoBar', 'recentForm'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '';
+    });
   }
 }
 
