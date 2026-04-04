@@ -52,6 +52,32 @@ app.get('/api/club/info', async (req, res) => {
   }
 });
 
+app.get('/api/club/stats', async (req, res) => {
+  try {
+    const url = `${EA_BASE}/clubs/stats?platform=${PLATFORM}&clubIds=${CLUB_ID}`;
+    const response = await fetch(url, { headers: EA_HEADERS });
+    if (!response.ok) throw new Error(`EA API responded with ${response.status}`);
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    console.error('Error fetching club stats:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/club/seasonal', async (req, res) => {
+  try {
+    const url = `${EA_BASE}/clubs/seasonalStats?platform=${PLATFORM}&clubIds=${CLUB_ID}`;
+    const response = await fetch(url, { headers: EA_HEADERS });
+    if (!response.ok) throw new Error(`EA API responded with ${response.status}`);
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    console.error('Error fetching club seasonal stats:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });

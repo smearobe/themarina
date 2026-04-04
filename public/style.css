@@ -201,6 +201,91 @@ main {
 .win-bar-fill.o { background: var(--gold); }
 .win-bar-fill.l { background: var(--red); }
 
+/* ── Club Info Bar ── */
+.club-info-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 20px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cib-item { display: flex; flex-direction: column; align-items: center; padding: 0 16px; }
+.cib-lbl { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); margin-bottom: 3px; }
+.cib-val { font-size: 1.1rem; font-weight: 800; color: var(--text); }
+.cib-val.gold { color: var(--gold); }
+.cib-divider { width: 1px; height: 36px; background: var(--border); flex-shrink: 0; }
+
+/* ── Recent Form ── */
+.recent-form-section { margin-bottom: 28px; }
+
+.form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.form-bubbles { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.form-bubble {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+
+.form-w { background: rgba(76,175,125,0.2); color: var(--green); border: 1px solid rgba(76,175,125,0.4); }
+.form-l { background: rgba(224,85,85,0.2); color: var(--red); border: 1px solid rgba(224,85,85,0.4); }
+
+.form-summary {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.form-sum-val { font-weight: 700; font-size: 0.95rem; }
+.form-sum-val.green { color: var(--green); }
+.form-sum-val.red { color: var(--red); }
+.pos { color: var(--green); }
+.neg { color: var(--red); }
+
+.form-rows { display: flex; flex-direction: column; gap: 6px; }
+
+.form-row {
+  display: grid;
+  grid-template-columns: 80px 80px 50px 40px;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg3);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  gap: 8px;
+}
+
+.form-game-num { color: var(--muted); font-size: 0.78rem; }
+.form-score { font-weight: 700; color: var(--text); }
+.form-gd { font-weight: 700; font-size: 0.85rem; }
+.form-result { font-weight: 800; font-size: 0.85rem; text-align: right; }
+.form-result-w { color: var(--green); }
+.form-result-l { color: var(--red); }
+
 /* ── Leaders ── */
 .section-title {
   font-size: 0.72rem;

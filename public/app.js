@@ -31,23 +31,32 @@ function minSec(totalSec) {
 // ── Data ─────────────────────────────────────────────────────────────────────
 
 let members = [];
+let clubInfo = null;
 let sortCol = null;
 let sortDir = 1; // 1 = desc, -1 = asc
 let currentGroup = 'scoring';
 
 async function loadData() {
   try {
-    const res = await fetch('/api/members/stats');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    members = data.members || [];
+    const [membersRes, clubRes] = await Promise.all([
+      fetch('/api/members/stats'),
+      fetch('/api/club/seasonal'),
+    ]);
+    if (!membersRes.ok) throw new Error(`HTTP ${membersRes.status}`);
+    const membersData = await membersRes.json();
+    members = membersData.members || [];
+
+    if (clubRes.ok) {
+      const clubData = await clubRes.json();
+      clubInfo = Array.isArray(clubData) ? clubData[0] : (clubData['80678'] || Object.values(clubData)[0] || null);
+    }
+
     renderAll();
   } catch (err) {
     document.getElementById('error-banner').classList.remove('hidden');
     document.getElementById('error-text').textContent =
       'Could not load stats from EA servers: ' + err.message;
-    // Clear loading states
-    ['teamRecord','teamOffense','teamDefense','leadersGrid','statsTableBody','cardsGrid']
+    ['teamRecord','teamOffense','teamDefense','leadersGrid','statsTableBody','cardsGrid','clubInfoBar','recentForm']
       .forEach(id => {
         const el = document.getElementById(id);
         if (el) el.innerHTML = '<p style="color:var(--muted);padding:10px 0">No data available.</p>';
@@ -57,7 +66,9 @@ async function loadData() {
 
 function renderAll() {
   renderHeader();
+  renderClubInfo();
   renderOverview();
+  renderRecentForm();
   renderLeaders();
   renderTable();
   renderCards();
@@ -88,6 +99,84 @@ function renderHeader() {
     <div class="record-stat"><div class="val">${winPct}%</div><div class="lbl">Win%</div></div>
     <div class="record-divider"></div>
     <div class="record-stat"><div class="val">${gp}</div><div class="lbl">GP</div></div>
+  `;
+}
+
+// ── Club Info Bar ─────────────────────────────────────────────────────────────
+
+function renderClubInfo() {
+  const el = document.getElementById('clubInfoBar');
+  if (!clubInfo) { el.innerHTML = ''; return; }
+
+  el.innerHTML = `
+    <div class="cib-item"><span class="cib-lbl">Current Division</span><span class="cib-val">${clubInfo.currentDivision}</span></div>
+    <div class="cib-divider"></div>
+    <div class="cib-item"><span class="cib-lbl">Seasons</span><span class="cib-val">${clubInfo.seasons}</span></div>
+    <div class="cib-divider"></div>
+    <div class="cib-item"><span class="cib-lbl">Titles</span><span class="cib-val">${clubInfo.titlesWon}</span></div>
+    <div class="cib-divider"></div>
+    <div class="cib-item"><span class="cib-lbl">Promotions</span><span class="cib-val">${clubInfo.promotions}</span></div>
+    <div class="cib-divider"></div>
+    <div class="cib-item"><span class="cib-lbl">Relegations</span><span class="cib-val">${clubInfo.relegations}</span></div>
+    <div class="cib-divider"></div>
+    <div class="cib-item"><span class="cib-lbl">Best Division</span><span class="cib-val">${clubInfo.bestDivision}</span></div>
+    <div class="cib-divider"></div>
+    <div class="cib-item"><span class="cib-lbl">Star Level</span><span class="cib-val gold">${clubInfo.starLevel} ★</span></div>
+  `;
+}
+
+// ── Recent Form ───────────────────────────────────────────────────────────────
+
+function renderRecentForm() {
+  const el = document.getElementById('recentForm');
+  if (!clubInfo) { el.innerHTML = '<p style="color:var(--muted)">No club data available.</p>'; return; }
+
+  const resultMap = { '0': 'L', '1': 'W', '2': 'W' }; // 2 = win by DNF
+  const resultCls = { '0': 'form-l', '1': 'form-w', '2': 'form-w' };
+
+  const games = [];
+  for (let i = 0; i <= 9; i++) {
+    const result = clubInfo[`recentResult${i}`];
+    const score  = clubInfo[`recentScore${i}`];
+    if (result === undefined || score === undefined) continue;
+    games.push({ result, score });
+  }
+
+  const formBubbles = games.map(g => `
+    <div class="form-bubble ${resultCls[g.result]}">${resultMap[g.result]}</div>
+  `).join('');
+
+  const formRows = games.map((g, i) => {
+    const [gf, ga] = g.score.split('-').map(Number);
+    const res = resultMap[g.result];
+    const resCls = res === 'W' ? 'form-result-w' : 'form-result-l';
+    return `
+      <div class="form-row">
+        <span class="form-game-num">Game ${i + 1}</span>
+        <span class="form-score">${g.score}</span>
+        <span class="form-gd ${gf > ga ? 'pos' : gf < ga ? 'neg' : ''}">${gf > ga ? '+' : ''}${gf - ga}</span>
+        <span class="form-result ${resCls}">${res}</span>
+      </div>
+    `;
+  }).join('');
+
+  const wins   = games.filter(g => g.result !== '0').length;
+  const losses = games.filter(g => g.result === '0').length;
+  const gf     = games.reduce((a, g) => a + parseInt(g.score.split('-')[0]), 0);
+  const ga     = games.reduce((a, g) => a + parseInt(g.score.split('-')[1]), 0);
+
+  el.innerHTML = `
+    <div class="form-header">
+      <div class="form-bubbles">${formBubbles}</div>
+      <div class="form-summary">
+        <span class="form-sum-item"><span class="form-sum-val green">${wins}W</span></span>
+        <span class="form-sum-item"><span class="form-sum-val red">${losses}L</span></span>
+        <span class="form-sum-item">GF <strong>${gf}</strong></span>
+        <span class="form-sum-item">GA <strong>${ga}</strong></span>
+        <span class="form-sum-item">GD <strong class="${gf - ga >= 0 ? 'pos' : 'neg'}">${gf >= ga ? '+' : ''}${gf - ga}</strong></span>
+      </div>
+    </div>
+    <div class="form-rows">${formRows}</div>
   `;
 }
 
