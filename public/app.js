@@ -32,6 +32,7 @@ function minSec(totalSec) {
 
 let members = [];
 let clubInfo = null;
+let matchHistory = [];
 let sortCol = null;
 let sortDir = 1; // 1 = desc, -1 = asc
 let currentGroup = 'scoring';
@@ -58,32 +59,24 @@ async function loadData() {
   // Render everything we have immediately
   renderAll();
 
-  // Fetch club seasonal data separately — won't block the main render
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-    const clubRes = await fetch('/api/club/seasonal', { signal: controller.signal });
-    clearTimeout(timeout);
-    if (clubRes.ok) {
-      const clubData = await clubRes.json();
-      clubInfo = Array.isArray(clubData) ? clubData[0] : (clubData['80678'] || Object.values(clubData)[0] || null);
+  // Fetch club seasonal data and match history in parallel — neither blocks the main render
+  await Promise.allSettled([
+    fetch('/api/club/seasonal').then(r => r.ok ? r.json() : null).then(data => {
+      if (!data) return;
+      clubInfo = Array.isArray(data) ? data[0] : (data['80678'] || Object.values(data)[0] || null);
       renderClubInfo();
+    }),
+    fetch('/api/club/matches').then(r => r.ok ? r.json() : null).then(data => {
+      if (Array.isArray(data)) matchHistory = data;
       renderRecentForm();
-    }
-  } catch (err) {
-    // Club info is non-critical — clear loading states silently
-    ['clubInfoBar', 'recentForm'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.innerHTML = '';
-    });
-  }
+    }),
+  ]);
 }
 
 function renderAll() {
   renderHeader();
   renderClubInfo();
   renderOverview();
-  renderRecentForm();
   renderLeaders();
   renderTable();
   renderCards();
@@ -142,57 +135,58 @@ function renderClubInfo() {
 
 // ── Recent Form ───────────────────────────────────────────────────────────────
 
-function renderRecentForm() {
+const RECENT_GAMES_INITIAL = 5;
+
+function renderRecentForm(showAll = false) {
   const el = document.getElementById('recentForm');
-  if (!clubInfo) { el.innerHTML = '<p style="color:var(--muted)">No club data available.</p>'; return; }
+  if (!matchHistory.length) { el.innerHTML = '<p style="color:var(--muted)">No recent games available.</p>'; return; }
 
-  const resultMap = { '0': 'L', '1': 'W', '2': 'W' }; // 2 = win by DNF
-  const resultCls = { '0': 'form-l', '1': 'form-w', '2': 'form-w' };
+  const CLUB_ID = '80678';
+  const visible = showAll ? matchHistory : matchHistory.slice(0, RECENT_GAMES_INITIAL);
+  const hasMore = !showAll && matchHistory.length > RECENT_GAMES_INITIAL;
 
-  const games = [];
-  for (let i = 0; i <= 9; i++) {
-    const result = clubInfo[`recentResult${i}`];
-    const score  = clubInfo[`recentScore${i}`];
-    if (result === undefined || score === undefined) continue;
-    games.push({ result, score });
-  }
+  const tiles = visible.map(match => {
+    const us = match.clubs[CLUB_ID];
+    if (!us) return '';
+    const opponentId = us.opponentClubId;
+    const them = match.clubs[opponentId];
+    const opponentName = them?.details?.name || 'Opponent';
+    const ourName = us.details?.name || 'Kuxin Deep';
+    const ourScore = parseInt(us.score);
+    const theirScore = parseInt(them?.score ?? 0);
+    const isWin = ourScore > theirScore;
+    const timeAgo = match.timeAgo ? `${match.timeAgo.number}${match.timeAgo.unit.charAt(0)} ago` : '';
 
-  const formBubbles = games.map(g => `
-    <div class="form-bubble ${resultCls[g.result]}">${resultMap[g.result]}</div>
-  `).join('');
-
-  const formRows = games.map((g, i) => {
-    const [gf, ga] = g.score.split('-').map(Number);
-    const res = resultMap[g.result];
-    const resCls = res === 'W' ? 'form-result-w' : 'form-result-l';
     return `
-      <div class="form-row">
-        <span class="form-game-num">Game ${i + 1}</span>
-        <span class="form-score">${g.score}</span>
-        <span class="form-gd ${gf > ga ? 'pos' : gf < ga ? 'neg' : ''}">${gf > ga ? '+' : ''}${gf - ga}</span>
-        <span class="form-result ${resCls}">${res}</span>
+      <div class="game-tile ${isWin ? 'game-tile-win' : 'game-tile-loss'}" data-matchid="${match.matchId}" style="cursor:pointer">
+        <div class="gt-time">${timeAgo}</div>
+        <div class="gt-matchup">
+          <div class="gt-team">
+            <span class="gt-name">${ourName}</span>
+            <span class="gt-score">${ourScore}</span>
+          </div>
+          <div class="gt-team gt-opponent">
+            <span class="gt-name">${opponentName}</span>
+            <span class="gt-score">${theirScore}</span>
+          </div>
+        </div>
       </div>
     `;
   }).join('');
 
-  const wins   = games.filter(g => g.result !== '0').length;
-  const losses = games.filter(g => g.result === '0').length;
-  const gf     = games.reduce((a, g) => a + parseInt(g.score.split('-')[0]), 0);
-  const ga     = games.reduce((a, g) => a + parseInt(g.score.split('-')[1]), 0);
-
   el.innerHTML = `
-    <div class="form-header">
-      <div class="form-bubbles">${formBubbles}</div>
-      <div class="form-summary">
-        <span class="form-sum-item"><span class="form-sum-val green">${wins}W</span></span>
-        <span class="form-sum-item"><span class="form-sum-val red">${losses}L</span></span>
-        <span class="form-sum-item">GF <strong>${gf}</strong></span>
-        <span class="form-sum-item">GA <strong>${ga}</strong></span>
-        <span class="form-sum-item">GD <strong class="${gf - ga >= 0 ? 'pos' : 'neg'}">${gf >= ga ? '+' : ''}${gf - ga}</strong></span>
-      </div>
-    </div>
-    <div class="form-rows">${formRows}</div>
+    <div class="games-ticker">${tiles}</div>
+    ${hasMore ? `<button class="games-more-btn" id="gamesMoreBtn">More (${matchHistory.length - RECENT_GAMES_INITIAL} more games)</button>` : ''}
   `;
+
+  el.querySelectorAll('.game-tile').forEach(tile => {
+    tile.addEventListener('click', () => {
+      const match = matchHistory.find(m => m.matchId === tile.dataset.matchid);
+      if (match) openRecapModal(match);
+    });
+  });
+
+  document.getElementById('gamesMoreBtn')?.addEventListener('click', () => renderRecentForm(true));
 }
 
 // ── Overview ──────────────────────────────────────────────────────────────────
@@ -235,13 +229,13 @@ function renderOverview() {
   document.getElementById('teamOffense').innerHTML = `
     <div class="card-title">Offensive Output</div>
     <div class="summary-rows">
-      <div class="summary-row"><span class="label">Total Goals</span><span class="value accent">${totG}</span></div>
+      <div class="summary-row"><span class="label">Total Goals</span><span class="value">${totG}</span></div>
       <div class="summary-row"><span class="label">Total Assists</span><span class="value">${totA}</span></div>
-      <div class="summary-row"><span class="label">Total Points</span><span class="value accent">${totG + totA}</span></div>
+      <div class="summary-row"><span class="label">Total Points</span><span class="value">${totG + totA}</span></div>
       <div class="summary-row"><span class="label">Power Play Goals</span><span class="value">${totPP}</span></div>
-      <div class="summary-row"><span class="label">Short-Handed Goals</span><span class="value gold">${totSH}</span></div>
+      <div class="summary-row"><span class="label">Short-Handed Goals</span><span class="value">${totSH}</span></div>
       <div class="summary-row"><span class="label">Game-Winning Goals</span><span class="value">${totGWG}</span></div>
-      <div class="summary-row"><span class="label">Hat Tricks</span><span class="value gold">${totHT}</span></div>
+      <div class="summary-row"><span class="label">Hat Tricks</span><span class="value">${totHT}</span></div>
       <div class="summary-row"><span class="label">Avg Shot%</span><span class="value">${avgShot}%</span></div>
     </div>
   `;
@@ -258,7 +252,7 @@ function renderOverview() {
   document.getElementById('teamDefense').innerHTML = `
     <div class="card-title">Defence & Discipline</div>
     <div class="summary-rows">
-      <div class="summary-row"><span class="label">Total Hits</span><span class="value accent">${totHits.toLocaleString()}</span></div>
+      <div class="summary-row"><span class="label">Total Hits</span><span class="value">${totHits.toLocaleString()}</span></div>
       <div class="summary-row"><span class="label">Blocked Shots</span><span class="value">${totBS}</span></div>
       <div class="summary-row"><span class="label">Takeaways</span><span class="value">${totTA}</span></div>
       <div class="summary-row"><span class="label">Giveaways</span><span class="value">${totGA.toLocaleString()}</span></div>
@@ -297,7 +291,6 @@ function renderLeaders() {
         <div class="leader-category">${cat.label}</div>
         <div class="leader-name">${leader.name}</div>
         <div class="leader-value">${cat.fmt(leader[cat.key])}</div>
-        <div class="leader-pos-badge ${posCls(leader.favoritePosition)}">${posLabel(leader.favoritePosition)}</div>
       </div>
     `;
   }).join('');
@@ -501,6 +494,297 @@ function renderCards() {
       if (m) openModal(m);
     });
   });
+}
+
+// ── Game Recap Modal ──────────────────────────────────────────────────────────
+
+const RECAP_CLUB_ID = '80678';
+
+function openRecapModal(match) {
+  const modal = document.getElementById('recapModal');
+  modal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  renderGameRecap(match);
+}
+
+function closeRecapModal() {
+  document.getElementById('recapModal').classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+document.getElementById('recapModalClose').addEventListener('click', closeRecapModal);
+document.getElementById('recapModal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeRecapModal();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeRecapModal(); });
+
+function renderGameRecap(match) {
+  const us = match.clubs[RECAP_CLUB_ID];
+  const opponentId = us.opponentClubId;
+  const them = match.clubs[opponentId];
+  const ourPlayers = Object.values(match.players?.[RECAP_CLUB_ID] || {});
+  const theirPlayers = Object.values(match.players?.[opponentId] || {});
+  const ourName = us.details?.name || 'Kuxin Deep';
+  const theirName = them?.details?.name || 'Opponent';
+  const isWin = parseInt(us.score) > parseInt(them?.score ?? 0);
+
+  const date = new Date(match.timestamp * 1000).toLocaleDateString('en-US', {
+    year: 'numeric', month: 'long', day: 'numeric'
+  });
+
+  // ── Stat bar helper ──
+  function statBar(label, ourVal, theirVal, displayOur, displayThem) {
+    const total = ourVal + theirVal || 1;
+    const ourPct = Math.round(ourVal / total * 100);
+    return `
+      <div class="rgc-stat-item">
+        <div class="rgc-stat-header">
+          <span class="rgc-stat-team-val">${displayOur ?? ourVal}</span>
+          <span class="rgc-stat-name">${label}</span>
+          <span class="rgc-stat-team-val">${displayThem ?? theirVal}</span>
+        </div>
+        <div class="rgc-bar-track">
+          <div class="rgc-bar-us" style="width:${ourPct}%"></div>
+          <div class="rgc-bar-them" style="width:${100 - ourPct}%"></div>
+        </div>
+      </div>`;
+  }
+
+  // ── Aggregate stats ──
+  const sum = (players, key) => players.reduce((a, p) => a + parseInt(p[key] || 0), 0);
+
+  const ourShots  = parseInt(us.shots || 0);
+  const themShots = parseInt(them?.shots || 0);
+
+  const ourFOW  = sum(ourPlayers, 'skfow'),  ourFOL  = sum(ourPlayers, 'skfol');
+  const themFOW = sum(theirPlayers, 'skfow'), themFOL = sum(theirPlayers, 'skfol');
+  const ourFOPct  = ourFOW  + ourFOL  > 0 ? (ourFOW  / (ourFOW  + ourFOL)  * 100).toFixed(1) : '0.0';
+  const themFOPct = themFOW + themFOL > 0 ? (themFOW / (themFOW + themFOL) * 100).toFixed(1) : '0.0';
+
+  const ourPPG = parseInt(us.ppg || 0),   ourPPO  = parseInt(us.ppo || 0);
+  const themPPG = parseInt(them?.ppg || 0), themPPO = parseInt(them?.ppo || 0);
+  const ourPPPct  = ourPPO  > 0 ? (ourPPG  / ourPPO  * 100).toFixed(1) : '0.0';
+  const themPPPct = themPPO > 0 ? (themPPG / themPPO * 100).toFixed(1) : '0.0';
+
+  const ourPIM  = sum(ourPlayers, 'skpim'),      themPIM  = sum(theirPlayers, 'skpim');
+  const ourHits = sum(ourPlayers, 'skhits'),     themHits = sum(theirPlayers, 'skhits');
+  const ourBS   = sum(ourPlayers, 'skbs'),       themBS   = sum(theirPlayers, 'skbs');
+  const ourGive = sum(ourPlayers, 'skgiveaways'), themGive = sum(theirPlayers, 'skgiveaways');
+  const ourTake = sum(ourPlayers, 'sktakeaways'), themTake = sum(theirPlayers, 'sktakeaways');
+
+  // ── Scoring summary — goal log (best approximation without event data) ──
+  const scorers = ourPlayers
+    .filter(p => p.position !== 'goalie' && parseInt(p.skgoals) > 0)
+    .sort((a, b) => parseInt(b.skgoals) - parseInt(a.skgoals));
+
+  const assisters = ourPlayers
+    .filter(p => parseInt(p.skassists) > 0)
+    .map(p => p.playername);
+
+  const goalRows = scorers.flatMap(p => {
+    const goals = parseInt(p.skgoals);
+    const isPP = parseInt(p.skppg) > 0;
+    return Array.from({ length: goals }, (_, i) => {
+      const tag = isPP && i < parseInt(p.skppg) ? ' <span class="rgc-goal-tag">PP</span>' : '';
+      const assisterList = assisters.filter(n => n !== p.playername);
+      const assistLine = assisterList.length
+        ? `<div class="rgc-goal-assist">Assisted by: ${assisterList.join(', ')}</div>`
+        : '<div class="rgc-goal-assist">Unassisted</div>';
+      return `
+        <div class="rgc-goal-entry">
+          <div class="rgc-goal-dot"></div>
+          <div>
+            <div class="rgc-goal-scorer">${p.playername}${tag}</div>
+            ${assistLine}
+          </div>
+        </div>`;
+    });
+  });
+
+  const goalie = ourPlayers.find(p => p.position === 'goalie');
+  const goalieHtml = goalie ? `
+    <div class="rgc-section-title" style="margin-top:20px">In Goal</div>
+    <div class="rgc-goal-entry">
+      <div class="rgc-goal-dot rgc-dot-g"></div>
+      <div>
+        <div class="rgc-goal-scorer">${goalie.playername}</div>
+        <div class="rgc-goal-assist">${goalie.glsaves} SV · ${(parseFloat(goalie.glsavepct) * 100).toFixed(1)}% SV% · ${goalie.glga} GA</div>
+      </div>
+    </div>` : '';
+
+  const scoringHtml = goalRows.length
+    ? goalRows.join('') + goalieHtml
+    : '<p class="rgc-empty">No goals recorded</p>' + goalieHtml;
+
+  // ── Box score ──
+  function buildBoxScoreTable(players, tableId) {
+    const skaters = players
+      .filter(p => p.position !== 'goalie')
+      .sort((a, b) => (parseInt(b.skgoals) + parseInt(b.skassists)) - (parseInt(a.skgoals) + parseInt(a.skassists)));
+    const gl = players.find(p => p.position === 'goalie');
+
+    const rows = skaters.map(p => {
+      const g  = parseInt(p.skgoals || 0);
+      const a  = parseInt(p.skassists || 0);
+      const pm = parseInt(p.skplusmin || 0);
+      const fo = parseFloat(p.skfopct || 0);
+      return `<tr>
+        <td class="bs-name">${p.playername}</td>
+        <td data-val="${g}">${g}</td>
+        <td data-val="${a}">${a}</td>
+        <td data-val="${g + a}">${g + a}</td>
+        <td data-val="${pm}" class="${pm > 0 ? 'bs-pos' : pm < 0 ? 'bs-neg' : ''}">${pm > 0 ? '+' + pm : pm}</td>
+        <td data-val="${parseInt(p.skpim || 0)}">${p.skpim || 0}</td>
+        <td data-val="${parseInt(p.skshots || 0)}">${p.skshots || 0}</td>
+        <td data-val="${parseInt(p.skbs || 0)}">${p.skbs || 0}</td>
+        <td data-val="${parseInt(p.skhits || 0)}">${p.skhits || 0}</td>
+        <td data-val="${parseInt(p.skgiveaways || 0)}">${p.skgiveaways || 0}</td>
+        <td data-val="${parseInt(p.sktakeaways || 0)}">${p.sktakeaways || 0}</td>
+        <td data-val="${fo}">${fo > 0 ? fo.toFixed(1) + '%' : '—'}</td>
+      </tr>`;
+    }).join('');
+
+    const goalieRow = gl ? `<tr class="bs-goalie-row">
+      <td class="bs-name">${gl.playername} <span class="bs-pos-tag">G</span></td>
+      <td colspan="5" style="color:var(--muted);font-size:0.78rem">${gl.glsaves} SV · ${(parseFloat(gl.glsavepct) * 100).toFixed(1)}% · ${gl.glga} GA</td>
+      <td colspan="6"></td>
+    </tr>` : '';
+
+    return `<div class="bs-wrap">
+      <table id="${tableId}" class="bs-table">
+        <thead><tr>
+          <th class="bs-name">Player</th>
+          <th data-sort>G</th><th data-sort>A</th><th data-sort>PTS</th><th data-sort>+/-</th>
+          <th data-sort>PIM</th><th data-sort>SOG</th><th data-sort>BLK</th><th data-sort>HIT</th>
+          <th data-sort>GV</th><th data-sort>TK</th><th data-sort>FO%</th>
+        </tr></thead>
+        <tbody>${rows}${goalieRow}</tbody>
+      </table>
+    </div>`;
+  }
+
+  const boxScoreHtml = `
+    <div class="bs-team-label">${ourName}</div>
+    ${buildBoxScoreTable(ourPlayers, 'bs-us')}
+    <div class="bs-team-label bs-team-label-opp">${theirName}</div>
+    ${buildBoxScoreTable(theirPlayers, 'bs-them')}`;
+
+  document.getElementById('recapModalContent').innerHTML = `
+    <div class="rgc-hero">
+      <div class="rgc-matchup">
+        <div class="rgc-team-us">
+          <span class="rgc-team-name">${ourName.toUpperCase()}</span>
+          <span class="rgc-team-score ${isWin ? 'rgc-score-win' : 'rgc-score-loss'}">${us.score}</span>
+        </div>
+        <div class="rgc-dash">–</div>
+        <div class="rgc-team-them">
+          <span class="rgc-team-score ${!isWin ? 'rgc-score-win' : 'rgc-score-neutral'}">${them?.score}</span>
+          <span class="rgc-team-name">${theirName.toUpperCase()}</span>
+        </div>
+      </div>
+      <div class="rgc-date">${date}</div>
+    </div>
+
+    <div class="rgc-body">
+      <div class="rgc-article-col">
+        <div id="recapArticle" class="rgc-article">
+          <div class="loading-pulse">Generating recap…</div>
+        </div>
+      </div>
+      <div class="rgc-side-col">
+        <div class="rgc-section-title">Scoring Summary</div>
+        ${scoringHtml}
+      </div>
+    </div>
+
+    <div class="rgc-lower">
+      <div class="rgc-stats-col">
+        <div class="rgc-section-title">Game Stats</div>
+        ${statBar('Shots on Goal', ourShots, themShots)}
+        ${statBar('Faceoff %', parseFloat(ourFOPct), parseFloat(themFOPct), ourFOPct + '%', themFOPct + '%')}
+        ${statBar('Power Play %', parseFloat(ourPPPct), parseFloat(themPPPct), ourPPPct + '% (' + ourPPG + '/' + ourPPO + ')', themPPPct + '% (' + themPPG + '/' + themPPO + ')')}
+        ${statBar('Penalty Minutes', ourPIM, themPIM)}
+        ${statBar('Hits', ourHits, themHits)}
+        ${statBar('Blocked Shots', ourBS, themBS)}
+        ${statBar('Giveaways', ourGive, themGive)}
+        ${statBar('Takeaways', ourTake, themTake)}
+      </div>
+      <div class="rgc-boxscore-col">
+        <div class="rgc-section-title">Box Score</div>
+        ${boxScoreHtml}
+      </div>
+    </div>
+  `;
+
+  makeBoxScoreSortable('bs-us');
+  makeBoxScoreSortable('bs-them');
+  loadRecapArticle(match.matchId);
+}
+
+function makeBoxScoreSortable(tableId) {
+  const table = document.getElementById(tableId);
+  if (!table) return;
+  let sortCol = null, sortDir = 1;
+
+  table.querySelectorAll('thead th[data-sort]').forEach((th, rawIdx) => {
+    // rawIdx is among sortable headers only; find real cell index
+    const colIdx = Array.from(th.parentElement.children).indexOf(th);
+    th.addEventListener('click', () => {
+      if (sortCol === colIdx) sortDir *= -1;
+      else { sortCol = colIdx; sortDir = 1; }
+
+      table.querySelectorAll('thead th').forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+      th.classList.add(sortDir > 0 ? 'sort-desc' : 'sort-asc');
+
+      const tbody = table.querySelector('tbody');
+      const goalieRow = tbody.querySelector('.bs-goalie-row');
+      const rows = Array.from(tbody.querySelectorAll('tr:not(.bs-goalie-row)'));
+
+      rows.sort((a, b) => {
+        const aVal = parseFloat(a.cells[colIdx]?.dataset.val) || 0;
+        const bVal = parseFloat(b.cells[colIdx]?.dataset.val) || 0;
+        return (bVal - aVal) * sortDir;
+      });
+
+      rows.forEach(r => tbody.appendChild(r));
+      if (goalieRow) tbody.appendChild(goalieRow);
+    });
+  });
+}
+
+async function loadRecapArticle(matchId) {
+  const el = document.getElementById('recapArticle');
+  if (!el) return;
+  try {
+    const res = await fetch(`/api/recap?matchId=${matchId}`);
+    const data = await res.json();
+    if (!data.recap) throw new Error('No recap');
+
+    const paras = data.recap.split('\n').filter(Boolean);
+    const first = paras.slice(0, 4);
+    const rest  = paras.slice(4);
+
+    const toHtml = lines => lines.map(l =>
+      l === l.toUpperCase() && l.length < 60
+        ? `<h3 class="rgc-article-heading">${l}</h3>`
+        : `<p>${l}</p>`
+    ).join('');
+
+    el.innerHTML = `
+      <div class="rgc-article-preview">${toHtml(first)}</div>
+      ${rest.length ? `
+        <div class="rgc-article-rest hidden">${toHtml(rest)}</div>
+        <button class="rgc-read-more" id="recapReadMore">Read More →</button>
+      ` : ''}
+    `;
+
+    document.getElementById('recapReadMore')?.addEventListener('click', function () {
+      document.querySelector('.rgc-article-rest').classList.remove('hidden');
+      this.remove();
+    });
+  } catch {
+    if (el) el.innerHTML = '<p class="rgc-empty">Recap unavailable.</p>';
+  }
 }
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
