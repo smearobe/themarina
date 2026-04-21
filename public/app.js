@@ -28,6 +28,15 @@ function minSec(totalSec) {
   return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 }
 
+function computeTimeAgo(timestamp) {
+  const diff = Math.floor(Date.now() / 1000) - timestamp;
+  if (diff < 3600)   return Math.round(diff / 60) + 'm ago';
+  if (diff < 86400)  return Math.round(diff / 3600) + 'h ago';
+  if (diff < 604800) return Math.round(diff / 86400) + 'd ago';
+  if (diff < 2592000) return Math.round(diff / 604800) + 'w ago';
+  return Math.round(diff / 2592000) + 'mo ago';
+}
+
 // ── Data ─────────────────────────────────────────────────────────────────────
 
 let members = [];
@@ -155,7 +164,7 @@ function renderRecentForm(showAll = false) {
     const ourScore = parseInt(us.score);
     const theirScore = parseInt(them?.score ?? 0);
     const isWin = ourScore > theirScore;
-    const timeAgo = match.timeAgo ? `${match.timeAgo.number}${match.timeAgo.unit.charAt(0)} ago` : '';
+    const timeAgo = match.timestamp ? computeTimeAgo(match.timestamp) : '';
 
     return `
       <div class="game-tile ${isWin ? 'game-tile-win' : 'game-tile-loss'}" data-matchid="${match.matchId}" style="cursor:pointer">
