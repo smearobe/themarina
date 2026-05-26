@@ -706,6 +706,10 @@ function renderGameRecap(match) {
       </div>
     </div>
 
+    <div id="recentFormSection" class="rgc-form-section">
+      <div class="loading-pulse" style="padding:14px 0">Loading recent form…</div>
+    </div>
+
     <div class="rgc-lower">
       <div class="rgc-stats-col">
         <div class="rgc-section-title">Game Stats</div>
@@ -727,7 +731,10 @@ function renderGameRecap(match) {
 
   makeBoxScoreSortable('bs-us');
   makeBoxScoreSortable('bs-them');
+
+  const currentPlayerNames = ourPlayers.map(p => p.playername).filter(Boolean);
   loadRecapArticle(match.matchId);
+  loadRecentForm(match.matchId, currentPlayerNames);
 }
 
 function makeBoxScoreSortable(tableId) {
@@ -793,6 +800,107 @@ async function loadRecapArticle(matchId) {
     });
   } catch {
     if (el) el.innerHTML = '<p class="rgc-empty">Recap unavailable.</p>';
+  }
+}
+
+async function loadRecentForm(matchId, currentPlayerNames) {
+  const el = document.getElementById('recentFormSection');
+  if (!el) return;
+
+  try {
+    const res = await fetch(`/api/recent-form?matchId=${matchId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    if (!data || data.team.gamesAvailable === 0) {
+      el.innerHTML = '';
+      return;
+    }
+
+    const { team, players } = data;
+
+    // ── Team form strip ──
+    const bubbles = team.form5.map(r =>
+      `<span class="rfb rfb-${r}">${r}</span>`
+    ).join('');
+
+    const r5  = team.record5;
+    const r10 = team.record10;
+
+    const streakLetter = team.streak ? team.streak[0] : '';
+    const streakHtml = team.streak
+      ? `<span class="rf-streak-inline rf-streak-${streakLetter}">${team.streak}</span>`
+      : '';
+
+    const teamHtml = `
+      <div class="rgc-form-team-panel">
+        <div class="rgc-section-title">Recent Team Form</div>
+        <div class="rgc-form-bubbles">${bubbles}</div>
+        <div class="rgc-form-summary">
+          ${r5.w}-${r5.l}-${r5.otl} last ${team.form5.length}
+          · ${streakHtml} streak
+          · GF&nbsp;${team.gf5}&nbsp;GA&nbsp;${team.ga5}
+        </div>
+        ${team.form10.length > 5
+          ? `<div class="rgc-form-trend">Last 10: ${r10.w}-${r10.l}-${r10.otl} · GF ${team.gf10} GA ${team.ga10}</div>`
+          : ''}
+      </div>`;
+
+    // ── Per-player form table ──
+    const relevantPlayers = currentPlayerNames
+      .map(name => ({ name, pd: players[name] }))
+      .filter(p => p.pd && p.pd.totals5.gp > 0);
+
+    let playersHtml = '';
+    if (relevantPlayers.length > 0) {
+      const rows = relevantPlayers.map(({ name, pd }) => {
+        const t = pd.totals5;
+
+        // Per-game dots for last 5 (newest → oldest left → right)
+        const dots = pd.last5.map(g =>
+          `<span class="rf-dot ${g.pts > 0 ? 'rf-dot-on' : 'rf-dot-off'}" title="${g.g}G ${g.a}A"></span>`
+        ).join('');
+
+        let badge = '';
+        if (pd.scoringStreak >= 2)
+          badge = `<span class="rf-badge rf-badge-hot">${pd.scoringStreak}-game pt streak</span>`;
+        else if (pd.goalStreak >= 2)
+          badge = `<span class="rf-badge rf-badge-hot">${pd.goalStreak}-game goal streak</span>`;
+        else if (pd.scoringStreak === 0 && t.gp >= 3)
+          badge = `<span class="rf-badge rf-badge-cold">Scoreless run</span>`;
+
+        return `<tr>
+          <td class="bs-name">${name}</td>
+          <td>${t.gp}</td>
+          <td>${t.g}</td>
+          <td>${t.a}</td>
+          <td><strong>${t.pts}</strong></td>
+          <td class="rf-dots-cell">${dots}</td>
+          <td>${badge}</td>
+        </tr>`;
+      }).join('');
+
+      playersHtml = `
+        <div class="rgc-form-players-panel">
+          <div class="rgc-section-title">Player Form — Last 5 Appearances</div>
+          <div class="bs-wrap">
+            <table class="rgc-form-table">
+              <thead><tr>
+                <th class="bs-name">Player</th>
+                <th>GP</th><th>G</th><th>A</th><th>PTS</th>
+                <th>Last 5</th><th></th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>`;
+    }
+
+    el.innerHTML = `<div class="rgc-form-inner">${teamHtml}${playersHtml}</div>`;
+
+  } catch (err) {
+    console.error('Recent form error:', err);
+    el.innerHTML = ''; // silently hide on failure
   }
 }
 

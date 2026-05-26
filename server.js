@@ -41,6 +41,160 @@ function mergeAndSaveMatches(incoming) {
   return stored;
 }
 
+// Compute recent form for a given match (excludes the match itself so it reads
+// as "entering this game with…" context).
+function computeRecentForm(currentMatchId) {
+  const stored = loadMatches();
+
+  // All matches except the current one, newest first
+  const history = Object.values(stored)
+    .filter(m => m.matchId !== currentMatchId)
+    .sort((a, b) => b.timestamp - a.timestamp);
+
+  if (history.length === 0) return null;
+
+  // ── Team form ────────────────────────────────────────────────────────────
+  const teamGames = history.slice(0, 10).map(m => {
+    const us  = m.clubs[CLUB_ID];
+    const opp = us ? m.clubs[us.opponentClubId] : null;
+    if (!us || !opp) return null;
+    const gf = parseInt(us.score);
+    const ga = parseInt(opp.score);
+    // EA stores 'otl' in the result field for overtime losses
+    const result = us.result === 'otl' ? 'OTL' : gf > ga ? 'W' : 'L';
+    return { result, gf, ga };
+  }).filter(Boolean);
+
+  const sumRecord = games => games.reduce(
+    (acc, g) => { acc[g.result === 'W' ? 'w' : g.result === 'L' ? 'l' : 'otl']++; return acc; },
+    { w: 0, l: 0, otl: 0 }
+  );
+
+  // Current streak (e.g. "L3", "W2")
+  let streak = '';
+  if (teamGames.length) {
+    const r = teamGames[0].result;
+    let n = 0;
+    for (const g of teamGames) { if (g.result === r) n++; else break; }
+    streak = `${r}${n}`;
+  }
+
+  const form5  = teamGames.slice(0, 5);
+  const form10 = teamGames.slice(0, 10);
+
+  // ── Player form ──────────────────────────────────────────────────────────
+  const rawPlayerData = {};
+
+  for (const m of history.slice(0, 10)) {
+    const players = Object.values(m.players?.[CLUB_ID] || {});
+    for (const p of players) {
+      if (!p.playername) continue;
+      const name = p.playername;
+      if (!rawPlayerData[name]) rawPlayerData[name] = [];
+      rawPlayerData[name].push({
+        g:        parseInt(p.skgoals   || 0),
+        a:        parseInt(p.skassists || 0),
+        pts:      parseInt(p.skgoals   || 0) + parseInt(p.skassists || 0),
+        shots:    parseInt(p.skshots   || 0),
+        pm:       parseInt(p.skplusmin || 0),
+        isGoalie: p.position === 'goalie',
+        timestamp: m.timestamp,
+      });
+    }
+  }
+
+  const players = {};
+  for (const [name, apps] of Object.entries(rawPlayerData)) {
+    // apps are newest-first (history is sorted)
+    const last5  = apps.slice(0, 5);
+    const last10 = apps.slice(0, 10);
+
+    const totals = gs => gs.reduce(
+      (acc, g) => ({ g: acc.g + g.g, a: acc.a + g.a, pts: acc.pts + g.pts }),
+      { g: 0, a: 0, pts: 0 }
+    );
+
+    // Consecutive games with at least one point
+    let scoringStreak = 0;
+    for (const g of last5) { if (g.pts > 0) scoringStreak++; else break; }
+
+    // Consecutive games with at least one goal (skaters only)
+    let goalStreak = 0;
+    if (!apps[0]?.isGoalie) {
+      for (const g of last5) { if (g.g > 0) goalStreak++; else break; }
+    }
+
+    players[name] = {
+      last5,
+      last10,
+      totals5:  { ...totals(last5),  gp: last5.length  },
+      totals10: { ...totals(last10), gp: last10.length },
+      scoringStreak,
+      goalStreak,
+      isGoalie: apps[0]?.isGoalie ?? false,
+    };
+  }
+
+  return {
+    team: {
+      form5:    form5.map(g => g.result),
+      record5:  sumRecord(form5),
+      form10:   form10.map(g => g.result),
+      record10: sumRecord(form10),
+      streak,
+      gf5:  form5.reduce((a, g)  => a + g.gf, 0),
+      ga5:  form5.reduce((a, g)  => a + g.ga, 0),
+      gf10: form10.reduce((a, g) => a + g.gf, 0),
+      ga10: form10.reduce((a, g) => a + g.ga, 0),
+      gamesAvailable: history.length,
+    },
+    players,
+  };
+}
+
+// Build a plain-text block for the Claude prompt.
+function buildRecentFormPromptText(recentForm, currentPlayerNames) {
+  if (!recentForm || recentForm.team.gamesAvailable === 0) return '';
+
+  const { team, players } = recentForm;
+  const lines = ['--- RECENT CONTEXT (weave naturally into the recap where relevant) ---'];
+
+  if (team.form5.length > 0) {
+    const r5 = team.record5;
+    lines.push(
+      `Team form last ${team.form5.length} games: ${team.form5.join(' ')} ` +
+      `(${r5.w}W-${r5.l}L-${r5.otl}OTL, currently on a ${team.streak} streak, ` +
+      `GF ${team.gf5} GA ${team.ga5})`
+    );
+  }
+  if (team.form10.length > 5) {
+    const r10 = team.record10;
+    lines.push(
+      `Last 10 games: ${r10.w}W-${r10.l}L-${r10.otl}OTL (GF ${team.gf10} GA ${team.ga10})`
+    );
+  }
+
+  const relevantPlayers = Object.entries(players)
+    .filter(([name]) => currentPlayerNames.includes(name));
+
+  if (relevantPlayers.length > 0) {
+    lines.push('');
+    lines.push('Player form entering this game:');
+    for (const [name, data] of relevantPlayers) {
+      const t = data.totals5;
+      if (t.gp === 0) continue;
+      let line = `  ${name}: ${t.g}G ${t.a}A (${t.pts} pts) in last ${t.gp} games`;
+      if (data.scoringStreak >= 3)                  line += ` — ${data.scoringStreak}-game point streak`;
+      else if (data.goalStreak >= 2)                line += ` — goal in ${data.goalStreak} straight games`;
+      else if (data.scoringStreak === 0 && t.gp >= 3) line += ` — scoreless in last ${t.gp} games`;
+      lines.push(line);
+    }
+  }
+
+  lines.push('--- END RECENT CONTEXT ---');
+  return '\n\n' + lines.join('\n');
+}
+
 const EA_BASE = 'https://proclubs.ea.com/api/nhl';
 const PLATFORM = 'common-gen5';
 const CLUB_ID = '80678';
@@ -209,15 +363,20 @@ app.get('/api/recap', async (req, res) => {
       players: playerSummaries,
     };
 
+    const recentForm = computeRecentForm(match.matchId);
+    const rfContext  = buildRecentFormPromptText(recentForm, playerSummaries.map(p => p.name));
+
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       system: `You are a hockey writer covering Kuxin Deep, a PS5 NHL ProClubs team whose fan site is called The Marina. Write short, punchy game recaps — three or four paragraphs max. Keep the tone light and fun; this is a group of friends playing video game hockey, not the Stanley Cup Finals. Don't be dramatic or overly critical when things go wrong — a bad game is just a bad game, not a referendum on anyone's character. Celebrate the good stuff, give a quick shrug to the bad, and move on. Weave in a couple of key stats naturally. Write in plain text with no markdown formatting.
 
+If recent performance context is provided, weave in a natural reference or two — things like a player being on a hot streak, the team looking to snap a skid, or a player bouncing back. Keep it light; it's colour, not analysis.
+
 Include one short fabricated post-game quote from a Kuxin Deep player. Keep it casual and a bit tongue-in-cheek — these are guys playing games with their mates, not professional athletes. The quote can be self-deprecating, have a bit of dry humour, or just be cheerfully clichéd. Integrate it naturally into the piece.`,
       messages: [{
         role: 'user',
-        content: `Write a game recap for The Marina based on the following match data:\n\n${JSON.stringify(gameData, null, 2)}`,
+        content: `Write a game recap for The Marina based on the following match data:\n\n${JSON.stringify(gameData, null, 2)}${rfContext}`,
       }],
     });
 
@@ -228,6 +387,13 @@ Include one short fabricated post-game quote from a Kuxin Deep player. Keep it c
     console.error('Error generating recap:', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get('/api/recent-form', (req, res) => {
+  const { matchId } = req.query;
+  if (!matchId) return res.status(400).json({ error: 'matchId required' });
+  const form = computeRecentForm(matchId);
+  res.json(form || { team: { gamesAvailable: 0 }, players: {} });
 });
 
 app.get('/api/debug/results', (req, res) => {
